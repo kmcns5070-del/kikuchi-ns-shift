@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub Pages プロジェクトランディングページ</title>
+    <!-- Tailwind CSS CDN を読み込み -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* グローバルなフォント設定 */
+        body {
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
+            background-color: #f7fafc; /* Tailwind: bg-gray-50 */
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center p-4 sm:p-8">
+
+    <div class="w-full max-w-4xl bg-white rounded-xl shadow-2xl overflow-hidden">
+        
+        <!-- ヘッダーエリア -->
+        <header class="bg-blue-600 p-6 sm:p-8 text-white">
+            <h1 class="text-3xl sm:text-4xl font-extrabold mb-1">プロジェクトランディングページ</h1>
+            <p class="text-blue-200 text-lg">GitHub Pagesで公開するためのシンプルなテンプレートです。</p>
+        </header>
+
+        <!-- メインコンテンツ -->
+        <main class="p-6 sm:p-8 space-y-10">
+
+            <!-- 1. アプリケーションの動作エリア (ここにあなたのコードが入ります) -->
+            <section class="border-4 border-dashed border-blue-200 p-6 sm:p-8 rounded-xl bg-blue-50/50 shadow-inner">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4 flex items-center">
+                    <span class="mr-2 text-3xl">🚀</span> アプリケーションの動作エリア
+                </h2>
+                <div id="app-container" class="bg-white p-4 border border-gray-300 rounded-lg min-h-[300px] flex items-center justify-center">
+                    <p class="text-gray-500 italic">
+                        ここにあなたのウェブアプリ（HTML, CSS, JavaScript, Canvasなど）を実装してください。
+                    </p>
+                    <!-- 例: シンプルなJavaScriptの動作 -->
+                    <button id="testButton" class="ml-4 px-4 py-2 bg-green-500 text-white font-semibold rounded-lg shadow hover:bg-green-600 transition">
+                        テストボタン
+                    </button>
+                </div>
+            </section>
+
+            <!-- 2. プロジェクトの要件とドキュメントエリア -->
+            <section class="bg-gray-50 p-6 sm:p-8 rounded-xl border border-gray-200">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4 flex items-center">
+                    <span class="mr-2 text-3xl">📄</span> プロジェクトの要件とドキュメント
+                </h2>
+                <div class="space-y-4 text-gray-700">
+                    <div class="p-4 bg-white rounded-lg border border-gray-100 shadow-sm">
+                        <h3 class="font-semibold text-xl mb-2 text-blue-700">プロジェクト名:</h3>
+                        <p>シフト管理ツールのプロトタイプ（GitHub Pages公開バージョン）</p>
+                    </div>
+                    
+                    <div class="p-4 bg-white rounded-lg border border-gray-100 shadow-sm">
+                        <h3 class="font-semibold text-xl mb-2 text-blue-700">主要機能（要件）:</h3>
+                        <ul class="list-disc list-inside ml-4 space-y-1">
+                            <li>カレンダー形式でのシフト表示（HTMLテーブルまたはCanvas）</li>
+                            <li>シフト入力/表示（〇、×、有休など）</li>
+                            <li>画面遷移のない単一ページアプリケーションであること</li>
+                            <li>モバイルフレンドリーなレスポンシブデザイン</li>
+                        </ul>
+                        <p class="mt-2 text-sm italic text-gray-500">
+                            ※ ここに、お客様との過去のやり取りで決まった要件を具体的に記述し、共有資料として活用できます。
+                        </p>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- フッターエリア -->
+        <footer class="bg-gray-100 p-6 sm:p-8 text-center text-sm text-gray-500 border-t">
+            <p>開発環境: VS Code / 言語: HTML, Tailwind CSS, JavaScript</p>
+            <p>ホスティング: GitHub Pages</p>
+        </footer>
+    </div>
+
+    <!-- JavaScript の実装エリア -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const button = document.getElementById('testButton');
+            const container = document.getElementById('app-container');
+
+            if (button) {
+                button.addEventListener('click', () => {
+                    const message = document.createElement('p');
+                    message.className = 'text-lg font-medium text-purple-600 mt-4';
+                    message.textContent = 'ボタンがクリックされました！GitHub Pagesで動作確認OK！';
+                    container.appendChild(message);
+                    button.disabled = true;
+                    button.classList.add('opacity-50', 'cursor-not-allowed');
+                });
+            }
+        });
+
+        // 実際のアプリケーションコードはこの <script> ブロック内に記述してください。
+        // 例: シフト管理のロジック、UI操作など
+    </script>
+</body>
+</html>
