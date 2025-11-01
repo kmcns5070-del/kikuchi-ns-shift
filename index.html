@@ -1,102 +1,932 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GitHub Pages プロジェクトランディングページ</title>
-    <!-- Tailwind CSS CDN を読み込み -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        /* グローバルなフォント設定 */
-        body {
-            font-family: 'Inter', 'Noto Sans JP', sans-serif;
-            background-color: #f7fafc; /* Tailwind: bg-gray-50 */
-        }
-    </style>
-</head>
-<body class="min-h-screen flex flex-col items-center p-4 sm:p-8">
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, signInAnonymously, signInWithCustomToken, createUserWithEmailAndPassword, 
+  signInWithEmailAndPassword, signOut, sendPasswordResetEmail, deleteUser, 
+  onAuthStateChanged 
+} from 'firebase/auth';
+import { 
+  getFirestore, doc, getDoc, setDoc, onSnapshot, collection, query, 
+  where, updateDoc 
+} from 'firebase/firestore';
 
-    <div class="w-full max-w-4xl bg-white rounded-xl shadow-2xl overflow-hidden">
-        
-        <!-- ヘッダーエリア -->
-        <header class="bg-blue-600 p-6 sm:p-8 text-white">
-            <h1 class="text-3xl sm:text-4xl font-extrabold mb-1">プロジェクトランディングページ</h1>
-            <p class="text-blue-200 text-lg">GitHub Pagesで公開するためのシンプルなテンプレートです。</p>
-        </header>
+// --- Firebase Initialization and Global Constants ---
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'shift-management-app';
 
-        <!-- メインコンテンツ -->
-        <main class="p-6 sm:p-8 space-y-10">
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
 
-            <!-- 1. アプリケーションの動作エリア (ここにあなたのコードが入ります) -->
-            <section class="border-4 border-dashed border-blue-200 p-6 sm:p-8 rounded-xl bg-blue-50/50 shadow-inner">
-                <h2 class="text-2xl font-bold text-gray-800 mb-4 flex items-center">
-                    <span class="mr-2 text-3xl">🚀</span> アプリケーションの動作エリア
-                </h2>
-                <div id="app-container" class="bg-white p-4 border border-gray-300 rounded-lg min-h-[300px] flex items-center justify-center">
-                    <p class="text-gray-500 italic">
-                        ここにあなたのウェブアプリ（HTML, CSS, JavaScript, Canvasなど）を実装してください。
-                    </p>
-                    <!-- 例: シンプルなJavaScriptの動作 -->
-                    <button id="testButton" class="ml-4 px-4 py-2 bg-green-500 text-white font-semibold rounded-lg shadow hover:bg-green-600 transition">
-                        テストボタン
-                    </button>
-                </div>
-            </section>
+// Firestore Path Definitions
+const COLLECTION_USERS = `artifacts/${appId}/users`;
+const COLLECTION_SHIFTS = `artifacts/${appId}/public/data/shifts`;
 
-            <!-- 2. プロジェクトの要件とドキュメントエリア -->
-            <section class="bg-gray-50 p-6 sm:p-8 rounded-xl border border-gray-200">
-                <h2 class="text-2xl font-bold text-gray-800 mb-4 flex items-center">
-                    <span class="mr-2 text-3xl">📄</span> プロジェクトの要件とドキュメント
-                </h2>
-                <div class="space-y-4 text-gray-700">
-                    <div class="p-4 bg-white rounded-lg border border-gray-100 shadow-sm">
-                        <h3 class="font-semibold text-xl mb-2 text-blue-700">プロジェクト名:</h3>
-                        <p>シフト管理ツールのプロトタイプ（GitHub Pages公開バージョン）</p>
-                    </div>
-                    
-                    <div class="p-4 bg-white rounded-lg border border-gray-100 shadow-sm">
-                        <h3 class="font-semibold text-xl mb-2 text-blue-700">主要機能（要件）:</h3>
-                        <ul class="list-disc list-inside ml-4 space-y-1">
-                            <li>カレンダー形式でのシフト表示（HTMLテーブルまたはCanvas）</li>
-                            <li>シフト入力/表示（〇、×、有休など）</li>
-                            <li>画面遷移のない単一ページアプリケーションであること</li>
-                            <li>モバイルフレンドリーなレスポンシブデザイン</li>
-                        </ul>
-                        <p class="mt-2 text-sm italic text-gray-500">
-                            ※ ここに、お客様との過去のやり取りで決まった要件を具体的に記述し、共有資料として活用できます。
-                        </p>
-                    </div>
-                </div>
-            </section>
-        </main>
+// User Roles
+const ROLES = {
+  NURSE: '看護師',
+  ADMIN: '管理者',
+  PARTTIME: 'パート',
+};
 
-        <!-- フッターエリア -->
-        <footer class="bg-gray-100 p-6 sm:p-8 text-center text-sm text-gray-500 border-t">
-            <p>開発環境: VS Code / 言語: HTML, Tailwind CSS, JavaScript</p>
-            <p>ホスティング: GitHub Pages</p>
-        </footer>
+// Shift Options Definition
+const SHIFT_OPTIONS = {
+  // 日勤系 (データ上、空欄も日勤扱い)
+  DAY: { value: '日', label: '日' },
+  FULL_DAY: { value: '〇', label: '〇' },
+  UNSELECTED: { value: '', label: ' ' }, // 空欄（データ上は日勤扱い）
+  // 短時間・残業系
+  H1: { value: '1h', label: '1h' },
+  H2: { value: '2h', label: '2h' },
+  H3: { value: '3h', label: '3h' },
+  H4: { value: '4h', label: '4h' },
+  AM: { value: '△', label: '△' },
+  OVERTIME: { value: '残', label: '残' },
+  // 休み・休暇系
+  OFF: { value: '×', label: '×' },
+  PAID: { value: '有', label: '有' },
+  COMP_OFF: { value: '代', label: '代' },
+  SUMMER: { value: '夏', label: '夏' },
+  WINTER: { value: '冬', label: '冬' },
+  // その他 (管理者日曜WAX特権用)
+  WAX: { value: 'WAX', label: 'WAX' },
+};
+
+// 休みとみなすシフト値（制約チェック対象）
+const SHIFT_OFF_VALUES = [
+  SHIFT_OPTIONS.OFF.value,
+  SHIFT_OPTIONS.PAID.value,
+  SHIFT_OPTIONS.COMP_OFF.value,
+  SHIFT_OPTIONS.SUMMER.value,
+  SHIFT_OPTIONS.WINTER.value,
+];
+
+// 休み希望の定数 (看護師のみ対象)
+const MAX_NURSES_OFF = {
+  0: 0, // 日曜日 (閉院のためチェック不要だが、念のため0)
+  1: 2, // 月曜日
+  2: 5, // 火曜日
+  3: 2, // 水曜日
+  4: 5, // 木曜日
+  5: 2, // 金曜日
+  6: 5, // 土曜日
+};
+
+// --- Utility Functions ---
+
+/**
+ * 空欄('')を日勤扱いとして、その日のシフトタイプを判別する
+ * @param {string} shiftValue シフト値
+ * @returns {boolean} 休み系のシフトであればtrue
+ */
+const isOffShift = (shiftValue) => {
+  return SHIFT_OFF_VALUES.includes(shiftValue);
+};
+
+/**
+ * 指定された年月の全日付を生成
+ * @param {Date} date - 基準となる日付
+ * @returns {Array<{date: string, dayOfWeek: number, isToday: boolean}>}
+ */
+const getDaysInMonth = (date) => {
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const today = new Date();
+  const days = [];
+
+  for (let day = 1; day <= new Date(year, month + 1, 0).getDate(); day++) {
+    const d = new Date(year, month, day);
+    const dateString = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const isToday = d.toDateString() === today.toDateString();
+    days.push({
+      date: dateString,
+      dayOfWeek: d.getDay(), // 0: 日, 1: 月, ..., 6: 土
+      isToday,
+    });
+  }
+  return days;
+};
+
+// --- Reusable Components ---
+
+/**
+ * カスタムアラートモーダル
+ */
+const CustomAlert = ({ message, onClose }) => {
+  if (!message) return null;
+
+  return (
+    <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm transform transition-all scale-100">
+        <h3 className="text-xl font-bold text-red-600 mb-4 border-b pb-2">警告</h3>
+        <p className="text-gray-700 mb-6">{message}</p>
+        <div className="flex justify-end">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-red-500 text-white font-semibold rounded-lg hover:bg-red-600 transition duration-150 shadow-md"
+          >
+            閉じる
+          </button>
+        </div>
+      </div>
     </div>
+  );
+};
 
-    <!-- JavaScript の実装エリア -->
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const button = document.getElementById('testButton');
-            const container = document.getElementById('app-container');
+/**
+ * ログアウト、アカウント削除、パスワードリセットボタン
+ */
+const MyPage = ({ user, setCurrentPage, handleLogout, handleDeleteAccount, handleAlert }) => {
+  const [resetEmail, setResetEmail] = useState('');
+  const [showPasswordReset, setShowPasswordReset] = useState(false);
 
-            if (button) {
-                button.addEventListener('click', () => {
-                    const message = document.createElement('p');
-                    message.className = 'text-lg font-medium text-purple-600 mt-4';
-                    message.textContent = 'ボタンがクリックされました！GitHub Pagesで動作確認OK！';
-                    container.appendChild(message);
-                    button.disabled = true;
-                    button.classList.add('opacity-50', 'cursor-not-allowed');
-                });
-            }
+  const handlePasswordReset = async () => {
+    if (!resetEmail) {
+      handleAlert("メールアドレスを入力してください。");
+      return;
+    }
+    try {
+      await sendPasswordResetEmail(auth, resetEmail);
+      handleAlert("パスワードリセットメールを送信しました。メールをご確認ください。");
+      setShowPasswordReset(false);
+      setResetEmail('');
+    } catch (error) {
+      console.error("Password reset error:", error);
+      handleAlert(`パスワードリセット中にエラーが発生しました: ${error.message}`);
+    }
+  };
+
+  return (
+    <div className="max-w-xl mx-auto p-6 bg-white shadow-xl rounded-xl mt-8">
+      <h2 className="text-3xl font-extrabold text-gray-800 mb-6 border-b pb-3">マイページ</h2>
+      <div className="space-y-4 text-lg">
+        <p><strong>名前:</strong> <span className="text-indigo-600 font-semibold">{user.name}</span></p>
+        <p><strong>役職:</strong> <span className="text-indigo-600 font-semibold">{user.role}</span></p>
+        <p><strong>ユーザーID:</strong> <span className="text-sm text-gray-500 break-all">{user.id}</span></p>
+      </div>
+
+      <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
+        {user.role !== ROLES.ADMIN && (
+          <button
+            onClick={() => setCurrentPage('shiftInput')}
+            className="py-3 px-4 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition duration-150 shadow-md"
+          >
+            シフト希望入力
+          </button>
+        )}
+        <button
+          onClick={() => setCurrentPage('shiftView')}
+          className="py-3 px-4 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 transition duration-150 shadow-md"
+        >
+          完成したシフト参照
+        </button>
+        <button
+          onClick={handleLogout}
+          className="py-3 px-4 bg-gray-500 text-white font-bold rounded-lg hover:bg-gray-600 transition duration-150 shadow-md"
+        >
+          ログアウト
+        </button>
+        <button
+          onClick={() => handleDeleteAccount(user.id)}
+          className="py-3 px-4 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition duration-150 shadow-md"
+        >
+          アカウント削除
+        </button>
+      </div>
+
+      <div className="mt-8 border-t pt-6">
+        <button
+          onClick={() => setShowPasswordReset(!showPasswordReset)}
+          className="text-indigo-600 hover:text-indigo-800 font-semibold text-sm"
+        >
+          パスワードリセット {showPasswordReset ? 'を閉じる' : 'をリクエスト'}
+        </button>
+        {showPasswordReset && (
+          <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+            <input
+              type="email"
+              placeholder="登録済みのメールアドレス"
+              value={resetEmail}
+              onChange={(e) => setResetEmail(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-3 focus:ring-indigo-500 focus:border-indigo-500"
+            />
+            <button
+              onClick={handlePasswordReset}
+              className="w-full py-2 bg-indigo-500 text-white font-semibold rounded-lg hover:bg-indigo-600 transition duration-150"
+            >
+              リセットメールを送信
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/**
+ * ログイン/登録コンポーネント
+ */
+const Auth = ({ setCurrentUser, handleAlert }) => {
+  const [isLogin, setIsLogin] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [role, setRole] = useState(ROLES.NURSE);
+  const [isResetMode, setIsResetMode] = useState(false);
+
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    try {
+      if (isLogin) {
+        // Login
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        // User data fetch is handled by onAuthStateChanged/fetchUserData
+      } else {
+        // Register
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const user = userCredential.user;
+        await setDoc(doc(db, COLLECTION_USERS, user.uid), {
+          id: user.uid,
+          email: email,
+          name: name,
+          role: role,
         });
+        // User data fetch is handled by onAuthStateChanged/fetchUserData
+      }
+    } catch (error) {
+      console.error("Auth error:", error);
+      handleAlert(isLogin ? `ログイン失敗: ${error.message}` : `登録失敗: ${error.message}`);
+    }
+  };
 
-        // 実際のアプリケーションコードはこの <script> ブロック内に記述してください。
-        // 例: シフト管理のロジック、UI操作など
-    </script>
-</body>
-</html>
+  const handlePasswordReset = async (e) => {
+    e.preventDefault();
+    try {
+      await sendPasswordResetEmail(auth, email);
+      handleAlert("パスワードリセットメールを送信しました。メールをご確認ください。");
+      setIsResetMode(false);
+      setEmail('');
+    } catch (error) {
+      console.error("Password reset error:", error);
+      handleAlert(`リセット中にエラーが発生しました: ${error.message}`);
+    }
+  };
+
+  return (
+    <div className="max-w-md mx-auto p-6 bg-white shadow-xl rounded-xl mt-8">
+      <h2 className="text-3xl font-bold text-gray-800 mb-6 text-center">
+        {isResetMode ? 'パスワードリセット' : (isLogin ? 'ログイン' : '新規アカウント登録')}
+      </h2>
+
+      <form onSubmit={isResetMode ? handlePasswordReset : handleAuth} className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700">メールアドレス</label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+            disabled={!isResetMode && !isLogin && !email} // 登録フォームでの変更後の表示名に影響しないように
+          />
+        </div>
+
+        {!isResetMode && (
+          <>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">パスワード</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
+            {!isLogin && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">表示名</label>
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">役職</label>
+                  <select
+                    value={role}
+                    onChange={(e) => setRole(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                    {Object.values(ROLES).map((r) => (
+                      <option key={r} value={r}>{r}</option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
+            <button
+              type="submit"
+              className="w-full py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition duration-150 shadow-md"
+            >
+              {isLogin ? 'ログイン' : '登録'}
+            </button>
+          </>
+        )}
+
+        {isResetMode && (
+          <button
+            type="submit"
+            className="w-full py-2 bg-red-500 text-white font-bold rounded-lg hover:bg-red-600 transition duration-150 shadow-md"
+          >
+            リセットメールを送信
+          </button>
+        )}
+      </form>
+
+      <div className="mt-6 flex justify-between text-sm">
+        <button
+          onClick={() => {
+            if (isResetMode) {
+              setIsResetMode(false);
+              setIsLogin(true);
+            } else {
+              setIsLogin(!isLogin);
+            }
+          }}
+          className="text-indigo-600 hover:text-indigo-800 font-semibold"
+        >
+          {isResetMode ? 'ログインに戻る' : (isLogin ? '新規アカウントを作成' : 'ログイン画面へ')}
+        </button>
+        {!isLogin && !isResetMode && (
+          <button
+            onClick={() => {
+              setIsResetMode(true);
+              setIsLogin(false);
+            }}
+            className="text-gray-500 hover:text-gray-700"
+          >
+            パスワードを忘れた場合
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/**
+ * シフトセルコンポーネント
+ */
+const StaffShiftCell = React.memo(({
+  date,
+  dayOfWeek,
+  shiftData,
+  user,
+  staffId,
+  staffRole,
+  isManagerView,
+  nurseOffCount,
+  handleAlert,
+}) => {
+  const isSunday = dayOfWeek === 0;
+  const isEditable = isManagerView || (user.id === staffId && user.role !== ROLES.ADMIN);
+
+  // 編集対象のフィールドを決定 (管理者なら 'finalized', 一般スタッフなら 'desired')
+  const editField = isManagerView ? 'finalized' : 'desired';
+  
+  // 表示するシフト値を取得 (確定シフトを優先、なければ希望シフト)
+  const finalized = shiftData?.finalized || '';
+  const desired = shiftData?.desired || '';
+  
+  // 表示値 (確定があれば確定、なければ希望)
+  const displayValue = finalized || desired;
+  
+  // 入力フォームの初期値 (editableなフィールドの値)
+  const initialValue = shiftData?.[editField] || '';
+  
+  // シフト値のオプションを決定
+  const options = useMemo(() => {
+    let opts = Object.values(SHIFT_OPTIONS);
+
+    // 管理者ユーザーが日曜日のセルを編集している場合のみ 'WAX' を含める
+    if (isSunday && isManagerView && user.role === ROLES.ADMIN) {
+      return opts.filter(opt => opt.value === SHIFT_OPTIONS.OFF.value || opt.value === SHIFT_OPTIONS.WAX.value || opt.value === SHIFT_OPTIONS.UNSELECTED.value);
+    }
+    
+    // 日曜日は初期値が「×」で、基本「×」しか選択できないようにするが、
+    // 要件「ただし選択はできるようにしておいて」を考慮し、一旦全オプションを表示
+    // ただし、UIのプルダウンには日勤(UNSELECTED, DAY, FULL_DAY)は不要で、OFFをデフォルト値とするのが自然。
+    // ここでは、ユーザーが選択肢を自由に選べるように全オプションを表示します。
+    return opts;
+  }, [isSunday, isManagerView, user.role]);
+
+  // Firestoreへのシフト更新処理
+  const updateShift = useCallback(async (newShiftValue) => {
+    const shiftDocRef = doc(db, COLLECTION_SHIFTS, date.substring(0, 7)); // 'YYYY-MM' ドキュメント
+    const updatePath = `${staffId}.${date}.${editField}`;
+
+    // 新しいシフト値が制約を超えていないかチェック (希望シフト入力時のみ)
+    if (!isManagerView && staffRole === ROLES.NURSE && isOffShift(newShiftValue)) {
+      const maxOff = MAX_NURSES_OFF[dayOfWeek];
+      // 現在の休み希望人数から、自分の元の希望を除き、新しい希望を加える
+      const currentOffWithoutMe = nurseOffCount - (isOffShift(initialValue) ? 1 : 0);
+      
+      if (currentOffWithoutMe + 1 > maxOff) {
+        handleAlert("規定人数を超えています。管理者に相談してください。");
+      }
+    }
+
+    try {
+      // 未選択 (空欄) の場合、データ上は '' (空文字) を保存する。
+      const valueToSave = newShiftValue === SHIFT_OPTIONS.UNSELECTED.value ? '' : newShiftValue;
+
+      // 日曜日は閉院のため、全員「×」が基本。
+      if (isSunday && newShiftValue !== SHIFT_OPTIONS.OFF.value && !(isManagerView && user.role === ROLES.ADMIN && newShiftValue === SHIFT_OPTIONS.WAX.value)) {
+        // 通常のスタッフが日曜日に×以外を選択した場合、または管理者が×/WAX以外を選択した場合
+        if (!isManagerView) {
+            handleAlert("日曜日は閉院のため、基本的に「×」を選択してください。");
+        }
+      }
+
+      await setDoc(shiftDocRef, {
+        [updatePath]: valueToSave,
+      }, { merge: true });
+
+    } catch (error) {
+      console.error("Shift update error:", error);
+      handleAlert(`シフト更新中にエラーが発生しました: ${error.message}`);
+    }
+  }, [date, dayOfWeek, staffId, editField, staffRole, isManagerView, nurseOffCount, initialValue, handleAlert, user.role, isSunday]);
+
+  // プルダウン変更ハンドラ
+  const handleChange = (e) => {
+    if (!isEditable) return;
+    updateShift(e.target.value);
+  };
+
+  // 文字色の決定: finalizedがあれば黒、desiredのみなら赤
+  const textColorClass = finalized ? 'text-gray-800' : (desired ? 'text-red-600 font-medium' : 'text-gray-400');
+  
+  // 日曜日のセルは特別な背景色
+  const bgColorClass = isSunday ? 'bg-red-50' : 'bg-white';
+  
+  // 現在のシフト値に対応するラベル
+  const currentLabel = options.find(opt => opt.value === displayValue)?.label || SHIFT_OPTIONS.UNSELECTED.label;
+
+  return (
+    <td className={`p-0 border border-gray-200 text-center relative ${bgColorClass}`}>
+      <select
+        value={initialValue} // フォームの値は常に編集対象フィールド
+        onChange={handleChange}
+        disabled={!isEditable}
+        className={`w-full h-10 appearance-none text-center cursor-pointer 
+                    ${isEditable ? 'hover:bg-indigo-50' : 'cursor-default opacity-80'} 
+                    ${bgColorClass} ${textColorClass} text-sm focus:ring-0 focus:border-indigo-500`}
+        title={isEditable ? 'シフトを選択' : '他のスタッフの希望は参照のみ'}
+      >
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>{opt.label}</option>
+        ))}
+      </select>
+      {/* 選択された値のオーバーレイ表示 (Selectのテキストが権限により変わるため) */}
+      <div 
+        className={`absolute inset-0 flex items-center justify-center pointer-events-none text-sm 
+                    ${textColorClass}`}
+        style={{ pointerEvents: 'none' }}
+      >
+        {currentLabel}
+      </div>
+    </td>
+  );
+});
+
+/**
+ * シフトカレンダー（入力/閲覧）コンポーネント
+ */
+const ShiftCalendar = ({ user, viewMode, setCurrentPage, allUsers, currentShiftData, handleAlert }) => {
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const yearMonth = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+  
+  // 管理者以外のスタッフリスト (管理者はシフト表に載らない)
+  const staffList = allUsers.filter(u => u.role !== ROLES.ADMIN);
+  const daysInMonth = useMemo(() => getDaysInMonth(currentDate), [currentDate]);
+
+  // 休み希望人数の集計 (看護師のみ)
+  const nurseOffCounts = useMemo(() => {
+    const counts = {};
+    daysInMonth.forEach(({ date, dayOfWeek }) => {
+      counts[date] = 0;
+      staffList.forEach(staff => {
+        if (staff.role === ROLES.NURSE) {
+          const shift = currentShiftData[staff.id]?.[date]?.desired || '';
+          if (isOffShift(shift)) {
+            counts[date] = (counts[date] || 0) + 1;
+          }
+        }
+      });
+    });
+    return counts;
+  }, [daysInMonth, staffList, currentShiftData]);
+  
+  // 現在の画面のタイトルと編集モード
+  const isManagerView = user.role === ROLES.ADMIN && viewMode === 'shiftInput';
+  const title = isManagerView ? '管理者シフト操作画面' : (viewMode === 'shiftInput' ? 'シフト希望入力' : '完成シフト参照');
+
+  // CSV出力機能 (管理者のみ)
+  const handleExportCSV = () => {
+    const header = ['名前', '役職', ...daysInMonth.map(d => d.date)];
+    const rows = staffList.map(staff => {
+      const staffRow = [staff.name, staff.role];
+      daysInMonth.forEach(d => {
+        // 確定シフトを参照 (最終的なシフト)
+        const shift = currentShiftData[staff.id]?.[d.date]?.finalized || currentShiftData[staff.id]?.[d.date]?.desired || '';
+        // 空欄（''）はデータ上日勤扱い
+        const displayShift = shift === '' ? SHIFT_OPTIONS.DAY.label : shift;
+        staffRow.push(displayShift);
+      });
+      return staffRow.join(',');
+    });
+    
+    const csvContent = [header.join(','), ...rows].join('\n');
+    
+    // Download logic
+    const blob = new Blob(["\ufeff", csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `Shift_${yearMonth}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    handleAlert('シフトデータをCSV形式でエクスポートしました。');
+  };
+
+  // 印刷機能 (管理者のみ)
+  const handlePrint = () => {
+    window.print();
+  };
+
+  // 月移動
+  const changeMonth = (delta) => {
+    setCurrentDate(prev => {
+      const newDate = new Date(prev.getFullYear(), prev.getMonth() + delta, 1);
+      return newDate;
+    });
+  };
+
+  return (
+    <div className="p-4 bg-gray-100 min-h-screen">
+      <div className="max-w-7xl mx-auto bg-white shadow-xl rounded-xl p-6 print:p-0 print:shadow-none">
+        <h2 className="text-3xl font-extrabold text-gray-800 mb-6 border-b pb-3 print:text-center print:text-2xl">{title}</h2>
+        
+        <div className="flex justify-between items-center mb-4 print:hidden">
+          <button 
+            onClick={() => setCurrentPage('mypage')}
+            className="px-4 py-2 bg-gray-200 text-gray-800 font-semibold rounded-lg hover:bg-gray-300 transition duration-150"
+          >
+            マイページに戻る
+          </button>
+          
+          <div className="flex items-center space-x-4">
+            <button 
+              onClick={() => changeMonth(-1)} 
+              className="p-2 bg-indigo-500 text-white rounded-full hover:bg-indigo-600 transition"
+            >
+              &larr;
+            </button>
+            <span className="text-xl font-bold">{currentDate.getFullYear()}年 {currentDate.getMonth() + 1}月</span>
+            <button 
+              onClick={() => changeMonth(1)} 
+              className="p-2 bg-indigo-500 text-white rounded-full hover:bg-indigo-600 transition"
+            >
+              &rarr;
+            </button>
+          </div>
+          
+          {isManagerView && (
+            <div className="space-x-2">
+              <button 
+                onClick={handleExportCSV}
+                className="px-4 py-2 bg-green-500 text-white font-semibold rounded-lg hover:bg-green-600 transition duration-150 shadow-md"
+              >
+                CSV出力
+              </button>
+              <button 
+                onClick={handlePrint}
+                className="px-4 py-2 bg-blue-500 text-white font-semibold rounded-lg hover:bg-blue-600 transition duration-150 shadow-md"
+              >
+                印刷
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* --- Shift Table --- */}
+        <div className="overflow-x-auto">
+          <table className="min-w-full border-collapse border border-gray-300">
+            <thead>
+              <tr>
+                <th className="sticky left-0 bg-gray-50 border border-gray-300 p-2 w-32 text-left print:w-20">スタッフ名</th>
+                {daysInMonth.map(({ date, dayOfWeek, isToday }) => (
+                  <th
+                    key={date}
+                    className={`border border-gray-300 p-1 text-xs font-semibold w-10 min-w-[40px] ${dayOfWeek === 0 ? 'bg-red-100' : (dayOfWeek === 6 ? 'bg-blue-100' : 'bg-gray-50')} ${isToday ? 'border-4 border-indigo-500' : ''}`}
+                  >
+                    {new Date(date).getDate()}
+                  </th>
+                ))}
+              </tr>
+              <tr>
+                <th className="sticky left-0 bg-gray-50 border border-gray-300 p-1 text-xs text-left print:w-20">曜日</th>
+                {daysInMonth.map(({ date, dayOfWeek }) => {
+                  const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+                  return (
+                    <th
+                      key={date + '-day'}
+                      className={`border border-gray-300 p-1 text-xs w-10 min-w-[40px] ${dayOfWeek === 0 ? 'bg-red-100 text-red-700' : (dayOfWeek === 6 ? 'bg-blue-100 text-blue-700' : 'bg-gray-50')}`}
+                    >
+                      {dayNames[dayOfWeek]}
+                    </th>
+                  );
+                })}
+              </tr>
+              {/* 休み希望定数アラート行 (管理者画面かつ希望入力時のみ) */}
+              {isManagerView && viewMode === 'shiftInput' && (
+                <tr className="print:hidden">
+                  <th className="sticky left-0 bg-yellow-100 border border-gray-300 p-1 text-xs text-left">休定数(N)</th>
+                  {daysInMonth.map(({ date, dayOfWeek }) => {
+                    const maxOff = MAX_NURSES_OFF[dayOfWeek];
+                    const currentOff = nurseOffCounts[date] || 0;
+                    const isOver = currentOff > maxOff;
+                    return (
+                      <td
+                        key={date + '-const'}
+                        className={`border border-gray-300 p-1 text-xs text-center font-bold 
+                                    ${isOver ? 'bg-red-300 text-red-900 animate-pulse' : 'bg-yellow-100 text-gray-800'}`}
+                        title={`看護師の休み希望: ${currentOff}人 / 定数: ${maxOff}人`}
+                      >
+                        {currentOff} / {maxOff}
+                      </td>
+                    );
+                  })}
+                </tr>
+              )}
+            </thead>
+            <tbody>
+              {staffList.map((staff) => (
+                <tr key={staff.id}>
+                  <td className="sticky left-0 bg-gray-50 border border-gray-300 p-2 font-semibold text-sm print:w-20">{staff.name} ({staff.role})</td>
+                  {daysInMonth.map(({ date, dayOfWeek }) => (
+                    <StaffShiftCell
+                      key={date}
+                      date={date}
+                      dayOfWeek={dayOfWeek}
+                      shiftData={currentShiftData[staff.id]?.[date]}
+                      user={user}
+                      staffId={staff.id}
+                      staffRole={staff.role}
+                      isManagerView={isManagerView}
+                      nurseOffCount={nurseOffCounts[date] || 0}
+                      handleAlert={handleAlert}
+                    />
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- Main Application Component ---
+
+const App = () => {
+  const [currentUser, setCurrentUser] = useState(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [allUsers, setAllUsers] = useState([]);
+  const [currentShiftData, setCurrentShiftData] = useState({}); // { userId: { 'YYYY-MM-DD': { desired: '×', finalized: '日' } } }
+  const [currentPage, setCurrentPage] = useState('mypage'); // auth, mypage, shiftInput, shiftView
+  const [alertMessage, setAlertMessage] = useState('');
+
+  // 1. Alert Handler
+  const handleAlert = (message) => {
+    setAlertMessage(message);
+  };
+
+  // 2. Initial Auth and User Data Fetch
+  const fetchUserData = useCallback(async (uid) => {
+    try {
+      const userDoc = await getDoc(doc(db, COLLECTION_USERS, uid));
+      if (userDoc.exists()) {
+        setCurrentUser(userDoc.data());
+        // 管理者は希望入力が不要なため、デフォルトで完成シフト参照画面へ遷移
+        if (userDoc.data().role === ROLES.ADMIN) {
+          setCurrentPage('shiftView'); 
+        } else {
+          setCurrentPage('mypage');
+        }
+      } else {
+        console.warn("User data not found for UID:", uid);
+        setCurrentUser(null);
+        await signOut(auth); // データがない場合はログアウト
+      }
+    } catch (error) {
+      console.error("Error fetching user data:", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Initial Auth Listener
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        // Firebase Authでログインしているが、Firestoreデータ取得前にAuth Readyを完了
+        // カスタムトークン認証を試行
+        if (initialAuthToken) {
+           try {
+            await signInWithCustomToken(auth, initialAuthToken);
+           } catch(error) {
+            console.error("Custom token sign-in failed:", error);
+            // 失敗しても匿名認証状態になるので続行
+           }
+        }
+        await fetchUserData(user.uid);
+      } else {
+        // ユーザーがいない場合、匿名認証またはAuth画面へ
+        if (!initialAuthToken) {
+            signInAnonymously(auth).catch(e => console.error("Anonymous sign-in failed:", e));
+            setCurrentPage('auth');
+        } else {
+             setCurrentPage('auth');
+        }
+        setCurrentUser(null);
+      }
+      setIsAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, [fetchUserData]);
+
+  // 3. Firestore Listeners for Users and Shifts
+  useEffect(() => {
+    if (!isAuthReady || !currentUser) return;
+    
+    // Listen for all users
+    const qUsers = query(collection(db, COLLECTION_USERS));
+    const unsubscribeUsers = onSnapshot(qUsers, (snapshot) => {
+      const users = snapshot.docs.map(doc => doc.data());
+      setAllUsers(users);
+    }, (error) => console.error("Error listening to users:", error));
+
+    // Listen for shifts (All months/public data are in one collection)
+    const qShifts = query(collection(db, COLLECTION_SHIFTS));
+    const unsubscribeShifts = onSnapshot(qShifts, (snapshot) => {
+      const newShiftData = {};
+      snapshot.docs.forEach(doc => {
+        const docId = doc.id; // YYYY-MM
+        const monthData = doc.data();
+        
+        // monthData: { userId: { 'YYYY-MM-DD': { desired: 'x', finalized: '日' } } }
+        Object.entries(monthData).forEach(([userId, shiftsByDate]) => {
+          if (!newShiftData[userId]) newShiftData[userId] = {};
+          
+          Object.entries(shiftsByDate).forEach(([date, shiftValues]) => {
+            // date: 'YYYY-MM-DD', shiftValues: { desired: 'x', finalized: '日' }
+            newShiftData[userId][date] = shiftValues;
+          });
+        });
+      });
+      setCurrentShiftData(newShiftData);
+    }, (error) => console.error("Error listening to shifts:", error));
+
+    return () => {
+      unsubscribeUsers();
+      unsubscribeShifts();
+    };
+  }, [isAuthReady, currentUser]);
+
+
+  // 4. Auth Actions
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setCurrentUser(null);
+      setCurrentPage('auth');
+      handleAlert("ログアウトしました。");
+    } catch (error) {
+      console.error("Logout error:", error);
+      handleAlert("ログアウト中にエラーが発生しました。");
+    }
+  };
+
+  const handleDeleteAccount = async (uid) => {
+    if (!uid) {
+        handleAlert("ユーザー情報が見つかりません。");
+        return;
+    }
+    // Note: Deleting user data in Firestore must be done client-side if no backend is available.
+    // In a real application, this should be handled by secure server-side logic.
+    const userToDelete = auth.currentUser;
+    if (userToDelete.uid !== uid) {
+        handleAlert("現在ログインしているユーザーと削除対象のユーザーが一致しません。");
+        return;
+    }
+    
+    if (!window.confirm("本当にアカウントを削除しますか？この操作は元に戻せません。")) {
+        return; // キャンセルされた場合
+    }
+
+    try {
+        // 1. Delete user data from Firestore
+        await deleteDoc(doc(db, COLLECTION_USERS, uid));
+        
+        // 2. Delete Auth user (requires recent re-authentication in real world)
+        // For this demo, we assume the initial token keeps the session alive.
+        await deleteUser(userToDelete);
+        
+        setCurrentUser(null);
+        setCurrentPage('auth');
+        handleAlert("アカウントとその関連データが正常に削除されました。");
+    } catch (error) {
+        console.error("Account deletion error:", error);
+        handleAlert(`アカウント削除中にエラーが発生しました: ${error.message}. 再ログインしてからお試しください。`);
+        // Force re-auth to handle "auth/requires-recent-login"
+        await signOut(auth);
+        setCurrentPage('auth');
+    }
+  };
+
+
+  if (!isAuthReady) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-100">
+        <div className="text-xl font-semibold text-indigo-600">認証情報を確認中...</div>
+      </div>
+    );
+  }
+
+  // Render based on current page state
+  let content;
+  if (!currentUser || currentPage === 'auth') {
+    content = <Auth setCurrentUser={setCurrentUser} handleAlert={handleAlert} />;
+  } else if (currentPage === 'mypage') {
+    content = (
+      <MyPage
+        user={currentUser}
+        setCurrentPage={setCurrentPage}
+        handleLogout={handleLogout}
+        handleDeleteAccount={handleDeleteAccount}
+        handleAlert={handleAlert}
+      />
+    );
+  } else if (currentPage === 'shiftInput' || currentPage === 'shiftView') {
+    content = (
+      <ShiftCalendar 
+        user={currentUser}
+        viewMode={currentPage}
+        setCurrentPage={setCurrentPage}
+        allUsers={allUsers}
+        currentShiftData={currentShiftData}
+        handleAlert={handleAlert}
+      />
+    );
+  } else {
+    content = <div>ページが見つかりません。</div>;
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-100 font-sans">
+      <header className="bg-indigo-600 shadow-md p-4 text-white">
+        <div className="max-w-7xl mx-auto flex justify-between items-center">
+          <h1 className="text-2xl font-extrabold tracking-tight">
+            シフト管理システム
+          </h1>
+          {currentUser && (
+            <div className="flex items-center space-x-4">
+              <span className="text-sm font-medium">ようこそ, {currentUser.name} ({currentUser.role})</span>
+              <button 
+                onClick={() => setCurrentPage('mypage')}
+                className="text-white hover:text-indigo-200 transition duration-150"
+              >
+                マイページ
+              </button>
+            </div>
+          )}
+        </div>
+      </header>
+      <main>
+        {content}
+        <CustomAlert message={alertMessage} onClose={() => setAlertMessage('')} />
+      </main>
+    </div>
+  );
+};
+
+export default App;
